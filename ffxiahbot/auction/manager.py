@@ -56,6 +56,10 @@ class Manager(Worker):
     sell_price_jitter_min_percent: float
     #: Maximum percentage jitter for listing prices.
     sell_price_jitter_max_percent: float
+    #: Maximum number of extra overstock listing attempts per restock cycle.
+    sell_overstock_attempt_cap: int
+    #: Geometric decay factor for each successive overstock attempt.
+    sell_overstock_decay: float
 
     @classmethod
     def create_database_and_manager(
@@ -101,6 +105,8 @@ class Manager(Worker):
         seller_pool: list[ConfigSellerPersona] | list[SellerPersona] | None = None,
         sell_price_jitter_min_percent: float = 5.0,
         sell_price_jitter_max_percent: float = 10.0,
+        sell_overstock_attempt_cap: int = 0,
+        sell_overstock_decay: float = 0.5,
     ) -> Manager:
         """
         Create manager from database.
@@ -114,9 +120,15 @@ class Manager(Worker):
             seller_pool: Optional pool of seller personas for restocking.
             sell_price_jitter_min_percent: Minimum absolute percent jitter for listing prices.
             sell_price_jitter_max_percent: Maximum absolute percent jitter for listing prices.
+            sell_overstock_attempt_cap: Maximum number of additional listings to attempt once stock is reached.
+            sell_overstock_decay: Geometric decay factor for each additional overstock attempt.
         """
         if sell_price_jitter_min_percent > sell_price_jitter_max_percent:
             raise ValueError("sell_price_jitter_min_percent cannot exceed sell_price_jitter_max_percent")
+        if sell_overstock_attempt_cap < 0:
+            raise ValueError("sell_overstock_attempt_cap cannot be negative")
+        if not 0 < sell_overstock_decay <= 1:
+            raise ValueError("sell_overstock_decay must be within (0, 1]")
 
         personas = cls._normalize_seller_pool(name=name, seller_pool=seller_pool)
         primary = personas[0]
@@ -130,6 +142,8 @@ class Manager(Worker):
             seller_pool=tuple(personas),
             sell_price_jitter_min_percent=sell_price_jitter_min_percent,
             sell_price_jitter_max_percent=sell_price_jitter_max_percent,
+            sell_overstock_attempt_cap=sell_overstock_attempt_cap,
+            sell_overstock_decay=sell_overstock_decay,
             rollback=rollback,
             fail=fail,
         )
@@ -350,6 +364,28 @@ class Manager(Worker):
                         seller=persona.seller,
                         seller_name=persona.seller_name,
                     )
+
+        # optional overstock after target stock is reached
+        if rate is None or self.sell_overstock_attempt_cap == 0:
+            return
+
+        base_probability = max(0.0, min(1.0, 0.5 * rate))
+        for attempt in range(self.sell_overstock_attempt_cap):
+            probability = base_probability * (self.sell_overstock_decay**attempt)
+            if random.random() > probability:
+                break
+
+            persona = self._choose_seller_persona()
+            listing_price = self._sample_listing_price(base_price=price, stack=stack)
+            self.seller.sell_item(
+                itemid=itemid,
+                stack=stack,
+                date=self._sell_time,
+                price=listing_price,
+                count=1,
+                seller=persona.seller,
+                seller_name=persona.seller_name,
+            )
 
     def _sample_listing_price(self, base_price: int, stack: bool) -> int:
         """
