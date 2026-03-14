@@ -261,7 +261,8 @@ class Manager(Worker):
         # check price
         if row.price <= max_price:
             date = timeutils.timestamp(datetime.datetime.now())
-            self.buyer.set_row_buyer_info(row, date, max_price)
+            executed_price = AuctionHouse.validate_price(row.price)
+            self.buyer.set_row_buyer_info(row, date, executed_price)
             return True
         else:
             logger.info(
