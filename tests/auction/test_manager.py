@@ -332,3 +332,111 @@ def test_restock_items_uses_jittered_prices_for_active_listings(
     listing_prices = [row.price for row in listings]
     assert listing_prices == [105, 94, 107]
     assert len(set(listing_prices)) > 1
+
+
+def test_sell_item_overstock_disabled_has_no_extras(populated_fake_db: Database) -> None:
+    manager = Manager.from_db(
+        populated_fake_db,
+        name="X",
+        rollback=True,
+        fail=True,
+        sell_price_jitter_min_percent=0.0,
+        sell_price_jitter_max_percent=0.0,
+        sell_overstock_attempt_cap=0,
+    )
+
+    manager._sell_item(itemid=1, stack=False, price=100, stock=2, rate=1.0)
+
+    with populated_fake_db.scoped_session() as session:
+        rows = session.query(AuctionHouse).filter(
+            AuctionHouse.itemid == 1,
+            AuctionHouse.stack == 0,
+            AuctionHouse.sale == 0,
+        )
+        assert rows.count() == 2
+
+
+def test_sell_item_overstock_first_extra_probability(populated_fake_db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = Manager.from_db(
+        populated_fake_db,
+        name="X",
+        rollback=True,
+        fail=True,
+        sell_price_jitter_min_percent=0.0,
+        sell_price_jitter_max_percent=0.0,
+        sell_overstock_attempt_cap=3,
+        sell_overstock_decay=0.5,
+    )
+
+    # stock fill (1) passes, first extra (0.49 <= 0.5) passes, second extra (0.3 > 0.25) fails.
+    rolls = iter([0.0, 0.49, 0.3])
+    monkeypatch.setattr("ffxiahbot.auction.manager.random.random", lambda: next(rolls))
+
+    manager._sell_item(itemid=1, stack=False, price=100, stock=1, rate=1.0)
+
+    with populated_fake_db.scoped_session() as session:
+        rows = session.query(AuctionHouse).filter(
+            AuctionHouse.itemid == 1,
+            AuctionHouse.stack == 0,
+            AuctionHouse.sale == 0,
+        )
+        assert rows.count() == 2
+
+
+def test_sell_item_overstock_subsequent_extras_are_rarer(
+    populated_fake_db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = Manager.from_db(
+        populated_fake_db,
+        name="X",
+        rollback=True,
+        fail=True,
+        sell_price_jitter_min_percent=0.0,
+        sell_price_jitter_max_percent=0.0,
+        sell_overstock_attempt_cap=3,
+        sell_overstock_decay=0.5,
+    )
+
+    # stock fill (0.0) pass, first extra threshold 0.5 and pass, second threshold 0.25 and fail.
+    rolls = iter([0.0, 0.49, 0.26])
+    monkeypatch.setattr("ffxiahbot.auction.manager.random.random", lambda: next(rolls))
+
+    manager._sell_item(itemid=1, stack=False, price=100, stock=1, rate=1.0)
+
+    with populated_fake_db.scoped_session() as session:
+        rows = session.query(AuctionHouse).filter(
+            AuctionHouse.itemid == 1,
+            AuctionHouse.stack == 0,
+            AuctionHouse.sale == 0,
+        )
+        assert rows.count() == 2
+
+
+def test_sell_item_overstock_extras_never_exceed_attempt_cap(
+    populated_fake_db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = Manager.from_db(
+        populated_fake_db,
+        name="X",
+        rollback=True,
+        fail=True,
+        sell_price_jitter_min_percent=0.0,
+        sell_price_jitter_max_percent=0.0,
+        sell_overstock_attempt_cap=2,
+        sell_overstock_decay=1.0,
+    )
+
+    monkeypatch.setattr("ffxiahbot.auction.manager.random.random", lambda: 0.0)
+
+    manager._sell_item(itemid=1, stack=False, price=100, stock=1, rate=1.0)
+
+    with populated_fake_db.scoped_session() as session:
+        rows = session.query(AuctionHouse).filter(
+            AuctionHouse.itemid == 1,
+            AuctionHouse.stack == 0,
+            AuctionHouse.sale == 0,
+        )
+        # one guaranteed stock + two overstock attempts
+        assert rows.count() == 3
