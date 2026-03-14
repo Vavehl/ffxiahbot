@@ -113,6 +113,39 @@ def test_buy_items(
                 ahr.validate_query_result(row, id=i + 1)
 
 
+def test_buy_items_records_executed_listing_price_not_max_cap(
+    populated_fake_db: Database,
+    item_list: ItemList,
+) -> None:
+    setup_ah_transactions(
+        populated_fake_db,
+        AHR(price=150, seller=1, seller_name="A", itemid=1, stack=1),
+        AHR(price=80, seller=1, seller_name="A", itemid=1, stack=0),
+    )
+
+    manager = Manager.from_db(
+        populated_fake_db,
+        name="X",
+        rollback=True,
+        fail=True,
+        sell_price_jitter_min_percent=0.0,
+        sell_price_jitter_max_percent=0.0,
+    )
+
+    manager.buy_items(item_list, use_buying_rates=False)
+
+    with populated_fake_db.scoped_session() as session:
+        stack_row = session.query(AuctionHouse).filter(AuctionHouse.id == 1).one()
+        single_row = session.query(AuctionHouse).filter(AuctionHouse.id == 2).one()
+
+    assert stack_row.sell_date != 0
+    assert single_row.sell_date != 0
+    assert stack_row.sale == 150
+    assert single_row.sale == 80
+    assert stack_row.buyer_name == "X"
+    assert single_row.buyer_name == "X"
+
+
 @pytest.mark.parametrize(
     "transactions,expected_history,expected_stock",
     [
