@@ -86,7 +86,14 @@ def test_buy_items(
     item_list: ItemList,
 ) -> None:
     setup_ah_transactions(populated_fake_db, *transactions)
-    manager = Manager.from_db(populated_fake_db, name="X", rollback=True, fail=True)
+    manager = Manager.from_db(
+        populated_fake_db,
+        name="X",
+        rollback=True,
+        fail=True,
+        sell_price_jitter_min_percent=0.0,
+        sell_price_jitter_max_percent=0.0,
+    )
 
     # perform buy loop multiple times
     for _ in range(3):
@@ -130,7 +137,14 @@ def test_restock_items(
     if transactions:
         setup_ah_transactions(populated_fake_db, *transactions)
 
-    manager = Manager.from_db(populated_fake_db, name="X", rollback=True, fail=True)
+    manager = Manager.from_db(
+        populated_fake_db,
+        name="X",
+        rollback=True,
+        fail=True,
+        sell_price_jitter_min_percent=0.0,
+        sell_price_jitter_max_percent=0.0,
+    )
 
     # perform restock loop multiple times
     for _ in range(3):
@@ -169,7 +183,14 @@ def test_restock_items_uses_default_single_seller_when_pool_not_configured(
     populated_fake_db: Database,
     item_list: ItemList,
 ) -> None:
-    manager = Manager.from_db(populated_fake_db, name="X", rollback=True, fail=True)
+    manager = Manager.from_db(
+        populated_fake_db,
+        name="X",
+        rollback=True,
+        fail=True,
+        sell_price_jitter_min_percent=0.0,
+        sell_price_jitter_max_percent=0.0,
+    )
 
     manager.restock_items(item_list, use_selling_rates=False)
 
@@ -207,7 +228,15 @@ def test_restock_items_distributes_stock_across_seller_pool(
         SellerPersona(seller=11, seller_name="Alpha", weight=1.0),
         SellerPersona(seller=22, seller_name="Bravo", weight=1.0),
     ]
-    manager = Manager.from_db(populated_fake_db, name="X", rollback=True, fail=True, seller_pool=pool)
+    manager = Manager.from_db(
+        populated_fake_db,
+        name="X",
+        rollback=True,
+        fail=True,
+        seller_pool=pool,
+        sell_price_jitter_min_percent=0.0,
+        sell_price_jitter_max_percent=0.0,
+    )
 
     picks = iter([pool[0], pool[1], pool[0], pool[1], pool[0]])
     monkeypatch.setattr("ffxiahbot.auction.manager.random.choices", lambda *_args, **_kwargs: [next(picks)])
@@ -225,3 +254,81 @@ def test_restock_items_distributes_stock_across_seller_pool(
         assert sellers == {11, 22}
         seller_names = {(row.seller, row.seller_name) for row in rows}
         assert seller_names == {(11, "Alpha"), (22, "Bravo")}
+
+
+def test_sample_listing_price_stays_within_bounds(populated_fake_db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = Manager.from_db(
+        populated_fake_db,
+        name="X",
+        rollback=True,
+        fail=True,
+        sell_price_jitter_min_percent=5.0,
+        sell_price_jitter_max_percent=10.0,
+    )
+
+    values = iter([0.05, 0.10, 0.06, 0.07])
+    signs = iter([0.2, 0.8, 0.2, 0.8])
+    monkeypatch.setattr("ffxiahbot.auction.manager.random.uniform", lambda *_args, **_kwargs: next(values))
+    monkeypatch.setattr("ffxiahbot.auction.manager.random.random", lambda: next(signs))
+
+    prices = [manager._sample_listing_price(base_price=100, stack=False) for _ in range(4)]
+
+    assert prices == [105, 90, 106, 93]
+    assert all(90 <= price <= 110 for price in prices)
+
+
+def test_restock_items_uses_jittered_prices_for_active_listings(
+    populated_fake_db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item_list = ItemList(
+        items={
+            1: Item(
+                itemid=1,
+                name="Fake Item A",
+                sell_single=True,
+                buy_single=True,
+                price_single=100,
+                stock_single=3,
+                rate_single=1.0,
+                sell_stacks=False,
+                buy_stacks=False,
+                price_stacks=0,
+                stock_stacks=0,
+                rate_stacks=1.0,
+            ),
+        }
+    )
+    manager = Manager.from_db(
+        populated_fake_db,
+        name="X",
+        rollback=True,
+        fail=True,
+        sell_price_jitter_min_percent=5.0,
+        sell_price_jitter_max_percent=10.0,
+    )
+
+    values = iter([0.05, 0.06, 0.07])
+    signs = iter([0.2, 0.8, 0.2])
+    monkeypatch.setattr("ffxiahbot.auction.manager.random.uniform", lambda *_args, **_kwargs: next(values))
+    monkeypatch.setattr("ffxiahbot.auction.manager.random.random", lambda: next(signs))
+
+    manager.restock_items(item_list, use_selling_rates=False)
+
+    with populated_fake_db.scoped_session() as session:
+        history = (
+            session.query(AuctionHouse)
+            .filter(AuctionHouse.itemid == 1, AuctionHouse.stack == 0, AuctionHouse.sale > 0)
+            .one()
+        )
+        listings = (
+            session.query(AuctionHouse)
+            .filter(AuctionHouse.itemid == 1, AuctionHouse.stack == 0, AuctionHouse.sale == 0)
+            .order_by(AuctionHouse.id.asc())
+            .all()
+        )
+
+    assert history.sale == 100
+    listing_prices = [row.price for row in listings]
+    assert listing_prices == [105, 94, 107]
+    assert len(set(listing_prices)) > 1

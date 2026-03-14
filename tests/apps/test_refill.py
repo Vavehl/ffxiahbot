@@ -14,7 +14,7 @@ from ffxiahbot.tables.auctionhouse import AuctionHouse
 
 @pytest.fixture
 def config() -> Config:
-    return Config()
+    return Config(sell_price_jitter_min_percent=0.0, sell_price_jitter_max_percent=0.0)
 
 
 @pytest.fixture
