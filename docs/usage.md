@@ -41,8 +41,9 @@ tick: 30 # seconds between buying
 restock: 3600 # seconds between selling
 use_buying_rates: false  # Only buy items a fraction of the time?
 use_selling_rates: false  # Only sell items a fraction of the time?
+seller_pool_path: seller_personae.yaml  # Optional external persona file (relative to config.yaml).
 use_seller_pool_weights: false  # Keep legacy uniform seller picks unless enabled.
-seller_pool: null  # Optional [{id, name, weight}] personas for sell listings.
+seller_pool: null  # Optional inline [{id, name, weight}] personas for sell listings.
 sell_price_jitter_min_percent: 0.0  # 0.0 keeps exact CSV sell prices.
 sell_price_jitter_max_percent: 0.0  # Set >0 for realism jitter.
 sell_overstock_attempt_cap: 0  # 0 disables overstock attempts.
@@ -67,18 +68,30 @@ Example profile with conservative realism enabled:
 
 ```yaml
 use_seller_pool_weights: true
-seller_pool:
-  - id: 0
-    name: M.H.M.U.
-    weight: 3.0
-  - id: 999
-    name: AltSeller
-    weight: 1.0
+seller_pool_path: seller_personae.yaml
 sell_price_jitter_min_percent: 1.0
 sell_price_jitter_max_percent: 3.0
 sell_overstock_attempt_cap: 1
 sell_overstock_decay: 0.5
 buy_price_slippage_percent: 2.0
+```
+
+`seller_personae.yaml` example:
+
+```yaml
+seller_pool:
+  - id: 101
+    name: Cloud
+    weight: 2.0
+  - id: 102
+    name: Cecil
+    weight: 1.5
+  - id: 103
+    name: Noctis
+    weight: 1.0
+  - id: 104
+    name: Terra
+    weight: 1.25
 ```
 
 ## Running the CLI

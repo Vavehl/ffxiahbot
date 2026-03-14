@@ -12,3 +12,7 @@ username: xi
 password: password
 port: 3306
 fail: true
+
+# Optional external seller persona pool
+seller_pool_path: seller_personae.yaml
+use_seller_pool_weights: true
