@@ -1,13 +1,151 @@
 seller_pool:
   - id: 101
     name: Cloud
-    weight: 2.0
+    weight: 1.5
   - id: 102
     name: Cecil
-    weight: 1.5
+    weight: 1.0
   - id: 103
     name: Noctis
     weight: 1.0
   - id: 104
     name: Terra
     weight: 1.25
+  - id: 105
+    name: Garland
+    weight: 0.4
+  - id: 106
+    name: Firion
+    weight: 0.65
+  - id: 107
+    name: Matoya
+    weight: 0.15
+  - id: 108
+    name: Bartz
+    weight: 0.9
+  - id: 109
+    name: Lenna
+    weight: 0.45
+  - id: 110
+    name: Faris
+    weight: 0.5
+  - id: 111
+    name: Galuf
+    weight: 0.35
+  - id: 112
+    name: Locke
+    weight: 0.75
+  - id: 113
+    name: Celes
+    weight: 0.85
+  - id: 114
+    name: Kefka
+    weight: 1.1
+  - id: 115
+    name: Tifa
+    weight: 1.5
+  - id: 116
+    name: Aerith
+    weight: 1.35
+  - id: 117
+    name: Sephiroth
+    weight: 1.6
+  - id: 118
+    name: Squall
+    weight: 1.15
+  - id: 119
+    name: Rinoa
+    weight: 0.9
+  - id: 120
+    name: Laguna
+    weight: 0.55
+  - id: 121
+    name: Vivi
+    weight: 1.2
+  - id: 122
+    name: Zidane
+    weight: 1.0
+  - id: 123
+    name: Garnet
+    weight: 0.7
+  - id: 124
+    name: Beatrix
+    weight: 0.45
+  - id: 125
+    name: Tidus
+    weight: 1.2
+  - id: 126
+    name: Yuna
+    weight: 1.25
+  - id: 127
+    name: Auron
+    weight: 0.95
+  - id: 128
+    name: Shantotto
+    weight: 1.1
+  - id: 129
+    name: Prishe
+    weight: 0.55
+  - id: 130
+    name: Vaan
+    weight: 0.75
+  - id: 131
+    name: Ashe
+    weight: 0.7
+  - id: 132
+    name: Balthier
+    weight: 0.95
+  - id: 133
+    name: Fran
+    weight: 0.65
+  - id: 134
+    name: Lightning
+    weight: 1.35
+  - id: 135
+    name: Snow
+    weight: 0.45
+  - id: 136
+    name: Serah
+    weight: 0.55
+  - id: 137
+    name: Yshtola
+    weight: 1.0
+  - id: 138
+    name: Graha Tia
+    weight: 0.55
+  - id: 139
+    name: Clive
+    weight: 1.1
+  - id: 140
+    name: Ramza
+    weight: 0.95
+  - id: 141
+    name: Delita
+    weight: 0.7
+  - id: 142
+    name: Agrias
+    weight: 0.6
+  - id: 143
+    name: Ace
+    weight: 0.55
+  - id: 144
+    name: Rem
+    weight: 0.4
+  - id: 145
+    name: Zack
+    weight: 0.95
+  - id: 146
+    name: Kain
+    weight: 0.6
+  - id: 147
+    name: Rydia
+    weight: 0.7
+  - id: 148
+    name: Golbez
+    weight: 0.5
+  - id: 149
+    name: Fusoya
+    weight: 0.25
+  - id: 150
+    name: Vincent
+    weight: 0.7
