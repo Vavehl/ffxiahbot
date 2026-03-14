@@ -12,6 +12,18 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from ffxiahbot.logutils import logger
 
 
+class SellerPersona(BaseModel):
+    """
+    Seller persona config.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    name: str
+    weight: float = Field(default=1.0, gt=0)
+
+
 # noinspection PyArgumentList
 class Config(BaseModel):
     """
@@ -26,6 +38,7 @@ class Config(BaseModel):
     restock: int = Field(default=3600)  # Restock interval (seconds)
     use_buying_rates: bool = Field(default=False)  # Only buy items a fraction of the time?
     use_selling_rates: bool = Field(default=False)  # Only sell items a fraction of the time?
+    seller_pool: list[SellerPersona] | None = Field(default=None)  # Optional pool of seller identities.
 
     # Database
     hostname: str = Field(default="127.0.0.1")  # SQL address

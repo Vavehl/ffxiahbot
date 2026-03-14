@@ -1,6 +1,6 @@
 import pytest
 
-from ffxiahbot.auction.manager import Manager
+from ffxiahbot.auction.manager import Manager, SellerPersona
 from ffxiahbot.database import Database
 from ffxiahbot.item import Item
 from ffxiahbot.itemlist import ItemList
@@ -163,3 +163,65 @@ def test_restock_items(
             )
             assert stacks_rows.count() == stacks_stock
             assert singles_rows.count() == singles_stock
+
+
+def test_restock_items_uses_default_single_seller_when_pool_not_configured(
+    populated_fake_db: Database,
+    item_list: ItemList,
+) -> None:
+    manager = Manager.from_db(populated_fake_db, name="X", rollback=True, fail=True)
+
+    manager.restock_items(item_list, use_selling_rates=False)
+
+    with populated_fake_db.scoped_session() as session:
+        rows = session.query(AuctionHouse).filter(AuctionHouse.sale == 0).all()
+        assert rows
+        assert {row.seller for row in rows} == {0}
+        assert {row.seller_name for row in rows} == {"X"}
+
+
+def test_restock_items_distributes_stock_across_seller_pool(
+    populated_fake_db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item_list = ItemList(
+        items={
+            1: Item(
+                itemid=1,
+                name="Fake Item A",
+                sell_single=True,
+                buy_single=True,
+                price_single=100,
+                stock_single=4,
+                rate_single=1.0,
+                sell_stacks=False,
+                buy_stacks=False,
+                price_stacks=0,
+                stock_stacks=0,
+                rate_stacks=1.0,
+            ),
+        }
+    )
+
+    pool = [
+        SellerPersona(seller=11, seller_name="Alpha", weight=1.0),
+        SellerPersona(seller=22, seller_name="Bravo", weight=1.0),
+    ]
+    manager = Manager.from_db(populated_fake_db, name="X", rollback=True, fail=True, seller_pool=pool)
+
+    picks = iter([pool[0], pool[1], pool[0], pool[1], pool[0]])
+    monkeypatch.setattr("ffxiahbot.auction.manager.random.choices", lambda *_args, **_kwargs: [next(picks)])
+
+    manager.restock_items(item_list, use_selling_rates=False)
+
+    with populated_fake_db.scoped_session() as session:
+        rows = session.query(AuctionHouse).filter(
+            AuctionHouse.itemid == 1,
+            AuctionHouse.stack == 0,
+            AuctionHouse.sale == 0,
+        )
+        assert rows.count() == 4
+        sellers = {row.seller for row in rows}
+        assert sellers == {11, 22}
+        seller_names = {(row.seller, row.seller_name) for row in rows}
+        assert seller_names == {(11, "Alpha"), (22, "Bravo")}

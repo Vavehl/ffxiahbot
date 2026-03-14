@@ -16,10 +16,22 @@ from ffxiahbot.auction.cleaner import Cleaner
 from ffxiahbot.auction.seller import Seller
 from ffxiahbot.auction.worker import Worker
 from ffxiahbot.common import progress_bar
+from ffxiahbot.config import SellerPersona as ConfigSellerPersona
 from ffxiahbot.database import Database
 from ffxiahbot.itemlist import ItemList
 from ffxiahbot.logutils import capture, logger
 from ffxiahbot.tables.auctionhouse import AuctionHouse
+
+
+@dataclass(frozen=True)
+class SellerPersona:
+    """
+    Seller identity data for a listing persona.
+    """
+
+    seller: int
+    seller_name: str
+    weight: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -38,6 +50,8 @@ class Manager(Worker):
     seller: Seller
     #: A worker to purchase items.
     buyer: Buyer
+    #: Pool of possible seller personas.
+    seller_pool: tuple[SellerPersona, ...]
 
     @classmethod
     def create_database_and_manager(
@@ -80,6 +94,7 @@ class Manager(Worker):
         fail: bool = True,
         rollback: bool = True,
         blacklist: set[int] | None = None,
+        seller_pool: list[ConfigSellerPersona] | list[SellerPersona] | None = None,
     ) -> Manager:
         """
         Create manager from database.
@@ -90,17 +105,43 @@ class Manager(Worker):
             fail: If True, raise exceptions.
             rollback: If True, rollback transactions.
             blacklist: Auction House row ids to ignore.
+            seller_pool: Optional pool of seller personas for restocking.
         """
+        personas = cls._normalize_seller_pool(name=name, seller_pool=seller_pool)
+        primary = personas[0]
         return cls(
             db=db,
             blacklist=blacklist if blacklist is not None else set(),
             browser=Browser(db=db, rollback=rollback, fail=fail),
             cleaner=Cleaner(db=db, rollback=rollback, fail=fail),
-            seller=Seller(db=db, rollback=rollback, fail=fail, seller=0, seller_name=name),
+            seller=Seller(db=db, rollback=rollback, fail=fail, seller=primary.seller, seller_name=primary.seller_name),
             buyer=Buyer(db=db, rollback=rollback, fail=fail, buyer_name=name),
+            seller_pool=tuple(personas),
             rollback=rollback,
             fail=fail,
         )
+
+    @staticmethod
+    def _normalize_seller_pool(
+        name: str,
+        seller_pool: list[ConfigSellerPersona] | list[SellerPersona] | None,
+    ) -> list[SellerPersona]:
+        if not seller_pool:
+            return [SellerPersona(seller=0, seller_name=name, weight=1.0)]
+
+        normalized: list[SellerPersona] = []
+        for persona in seller_pool:
+            if isinstance(persona, ConfigSellerPersona):
+                normalized.append(SellerPersona(seller=persona.id, seller_name=persona.name, weight=persona.weight))
+            else:
+                normalized.append(persona)
+        return normalized
+
+    def _choose_seller_persona(self) -> SellerPersona:
+        """
+        Choose a seller persona for the current listing attempt.
+        """
+        return random.choices(self.seller_pool, weights=[p.weight for p in self.seller_pool], k=1)[0]
 
     def add_to_blacklist(self, rowid: int) -> None:
         """
@@ -245,6 +286,18 @@ class Manager(Worker):
         """
         return timeutils.timestamp(datetime.datetime(2099, 1, 1))
 
+    def _pool_stock(self, itemid: int, stack: bool) -> int:
+        """
+        Total stock for this manager's seller personas.
+        """
+        return sum(self.browser.get_stock(itemid=itemid, stack=stack, seller=persona.seller) for persona in self.seller_pool)
+
+    def _pool_has_history(self, itemid: int, stack: bool) -> bool:
+        """
+        True if any seller persona already has historical pricing data.
+        """
+        return any(self.browser.get_price(itemid=itemid, stack=stack, seller=persona.seller) for persona in self.seller_pool)
+
     def _sell_item(self, itemid: int, stack: bool, price: int, stock: int, rate: float | None) -> None:
         """
         Sell an item.
@@ -256,17 +309,30 @@ class Manager(Worker):
             stock: The amount of items to stock.
         """
         # check history
-        history_price = self.browser.get_price(itemid=itemid, stack=stack, seller=self.seller.seller)
-
-        # set history
-        if history_price is None or history_price <= 0:
-            self.seller.set_history(itemid=itemid, stack=stack, price=price, date=self._sell_time, count=1)
-
-        # get stock
-        current_stock = self.browser.get_stock(itemid=itemid, stack=stack, seller=self.seller.seller)
+        if not self._pool_has_history(itemid=itemid, stack=stack):
+            persona = self._choose_seller_persona()
+            self.seller.set_history(
+                itemid=itemid,
+                stack=stack,
+                price=price,
+                date=self._sell_time,
+                count=1,
+                seller=persona.seller,
+                seller_name=persona.seller_name,
+            )
 
         # restock
+        current_stock = self._pool_stock(itemid=itemid, stack=stack)
         if current_stock < stock:
             for _ in range(stock - current_stock):
                 if rate is None or random.random() <= rate:
-                    self.seller.sell_item(itemid=itemid, stack=stack, date=self._sell_time, price=price, count=1)
+                    persona = self._choose_seller_persona()
+                    self.seller.sell_item(
+                        itemid=itemid,
+                        stack=stack,
+                        date=self._sell_time,
+                        price=price,
+                        count=1,
+                        seller=persona.seller,
+                        seller_name=persona.seller_name,
+                    )
