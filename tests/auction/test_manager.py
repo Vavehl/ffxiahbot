@@ -440,3 +440,83 @@ def test_sell_item_overstock_extras_never_exceed_attempt_cap(
         )
         # one guaranteed stock + two overstock attempts
         assert rows.count() == 3
+
+
+@pytest.mark.parametrize(
+    "current_stock,expected",
+    [
+        pytest.param(0, 1.0, id="low-pressure-boosted-and-clamped"),
+        pytest.param(2, 0.8, id="at-target-uses-base-rate"),
+        pytest.param(4, 0.0, id="high-pressure-suppressed"),
+    ],
+)
+def test_effective_sell_rate_respects_pressure_and_bounds(current_stock: int, expected: float) -> None:
+    rate = Manager._effective_sell_rate(rate=0.8, current_stock=current_stock, target_stock=2)
+    assert rate == pytest.approx(expected)
+
+
+def test_effective_sell_rate_monotonic_with_higher_pressure() -> None:
+    low_pressure = Manager._effective_sell_rate(rate=0.6, current_stock=0, target_stock=2)
+    target_pressure = Manager._effective_sell_rate(rate=0.6, current_stock=2, target_stock=2)
+    high_pressure = Manager._effective_sell_rate(rate=0.6, current_stock=4, target_stock=2)
+
+    assert low_pressure >= target_pressure >= high_pressure
+    assert all(0.0 <= value <= 1.0 for value in (low_pressure, target_pressure, high_pressure))
+
+
+def test_sell_item_high_pressure_blocks_restock_and_overstock(
+    populated_fake_db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = Manager.from_db(
+        populated_fake_db,
+        name="X",
+        rollback=True,
+        fail=True,
+        sell_price_jitter_min_percent=0.0,
+        sell_price_jitter_max_percent=0.0,
+        sell_overstock_attempt_cap=2,
+        sell_overstock_decay=1.0,
+    )
+
+    setup_ah_transactions(populated_fake_db, *AHR.many(count=4, seller=0, seller_name="X", itemid=1, stack=0))
+    monkeypatch.setattr("ffxiahbot.auction.manager.random.random", lambda: 0.0)
+
+    manager._sell_item(itemid=1, stack=False, price=100, stock=2, rate=0.8)
+
+    with populated_fake_db.scoped_session() as session:
+        rows = session.query(AuctionHouse).filter(
+            AuctionHouse.itemid == 1,
+            AuctionHouse.stack == 0,
+            AuctionHouse.sale == 0,
+        )
+        assert rows.count() == 4
+
+
+def test_sell_item_low_pressure_allows_restock_and_overstock(
+    populated_fake_db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = Manager.from_db(
+        populated_fake_db,
+        name="X",
+        rollback=True,
+        fail=True,
+        sell_price_jitter_min_percent=0.0,
+        sell_price_jitter_max_percent=0.0,
+        sell_overstock_attempt_cap=2,
+        sell_overstock_decay=1.0,
+    )
+
+    monkeypatch.setattr("ffxiahbot.auction.manager.random.random", lambda: 0.0)
+
+    manager._sell_item(itemid=1, stack=False, price=100, stock=2, rate=0.8)
+
+    with populated_fake_db.scoped_session() as session:
+        rows = session.query(AuctionHouse).filter(
+            AuctionHouse.itemid == 1,
+            AuctionHouse.stack == 0,
+            AuctionHouse.sale == 0,
+        )
+        # 2 restock listings + 2 overstock listings
+        assert rows.count() == 4
