@@ -1,0 +1,13 @@
+seller_pool:
+  - id: 101
+    name: Cloud
+    weight: 2.0
+  - id: 102
+    name: Cecil
+    weight: 1.5
+  - id: 103
+    name: Noctis
+    weight: 1.0
+  - id: 104
+    name: Terra
+    weight: 1.25
