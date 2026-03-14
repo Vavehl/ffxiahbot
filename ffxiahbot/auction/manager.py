@@ -325,6 +325,21 @@ class Manager(Worker):
         """
         return any(self.browser.get_price(itemid=itemid, stack=stack, seller=persona.seller) for persona in self.seller_pool)
 
+    @staticmethod
+    def _effective_sell_rate(rate: float, current_stock: int, target_stock: int) -> float:
+        """
+        Effective sell probability adjusted by local stock pressure.
+
+        Lower relative stock increases probability, while higher stock pressure reduces it.
+        """
+        bounded_rate = max(0.0, min(1.0, rate))
+        if target_stock <= 0:
+            return bounded_rate
+
+        stock_ratio = current_stock / target_stock
+        pressure_factor = max(0.0, 2.0 - stock_ratio)
+        return max(0.0, min(1.0, bounded_rate * pressure_factor))
+
     def _sell_item(self, itemid: int, stack: bool, price: int, stock: int, rate: float | None) -> None:
         """
         Sell an item.
@@ -352,7 +367,8 @@ class Manager(Worker):
         current_stock = self._pool_stock(itemid=itemid, stack=stack)
         if current_stock < stock:
             for _ in range(stock - current_stock):
-                if rate is None or random.random() <= rate:
+                probability = 1.0 if rate is None else self._effective_sell_rate(rate, current_stock, stock)
+                if random.random() <= probability:
                     persona = self._choose_seller_persona()
                     listing_price = self._sample_listing_price(base_price=price, stack=stack)
                     self.seller.sell_item(
@@ -364,14 +380,15 @@ class Manager(Worker):
                         seller=persona.seller,
                         seller_name=persona.seller_name,
                     )
+                    current_stock += 1
 
         # optional overstock after target stock is reached
         if rate is None or self.sell_overstock_attempt_cap == 0:
             return
 
-        base_probability = max(0.0, min(1.0, 0.5 * rate))
         for attempt in range(self.sell_overstock_attempt_cap):
-            probability = base_probability * (self.sell_overstock_decay**attempt)
+            effective_rate = self._effective_sell_rate(rate, current_stock, stock)
+            probability = effective_rate * (self.sell_overstock_decay**attempt)
             if random.random() > probability:
                 break
 
@@ -386,6 +403,7 @@ class Manager(Worker):
                 seller=persona.seller,
                 seller_name=persona.seller_name,
             )
+            current_stock += 1
 
     def _sample_listing_price(self, base_price: int, stack: bool) -> int:
         """
