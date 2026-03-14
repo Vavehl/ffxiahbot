@@ -39,6 +39,8 @@ class Config(BaseModel):
     use_buying_rates: bool = Field(default=False)  # Only buy items a fraction of the time?
     use_selling_rates: bool = Field(default=False)  # Only sell items a fraction of the time?
     seller_pool: list[SellerPersona] | None = Field(default=None)  # Optional pool of seller identities.
+    sell_price_jitter_min_percent: float = Field(default=5.0, ge=0.0)  # Min listing price jitter percentage.
+    sell_price_jitter_max_percent: float = Field(default=10.0, ge=0.0)  # Max listing price jitter percentage.
 
     # Database
     hostname: str = Field(default="127.0.0.1")  # SQL address

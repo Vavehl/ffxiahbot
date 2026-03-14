@@ -53,6 +53,8 @@ def main(
             name=config.name,
             fail=config.fail,
             seller_pool=config.seller_pool,
+            sell_price_jitter_min_percent=config.sell_price_jitter_min_percent,
+            sell_price_jitter_max_percent=config.sell_price_jitter_max_percent,
         )
         Base.metadata.create_all(manager.db.engine)
     else:
@@ -65,6 +67,8 @@ def main(
             name=config.name,
             fail=config.fail,
             seller_pool=config.seller_pool,
+            sell_price_jitter_min_percent=config.sell_price_jitter_min_percent,
+            sell_price_jitter_max_percent=config.sell_price_jitter_max_percent,
         )
 
     # test database connection

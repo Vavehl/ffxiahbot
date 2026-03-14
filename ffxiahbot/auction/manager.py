@@ -52,6 +52,10 @@ class Manager(Worker):
     buyer: Buyer
     #: Pool of possible seller personas.
     seller_pool: tuple[SellerPersona, ...]
+    #: Minimum percentage jitter for listing prices.
+    sell_price_jitter_min_percent: float
+    #: Maximum percentage jitter for listing prices.
+    sell_price_jitter_max_percent: float
 
     @classmethod
     def create_database_and_manager(
@@ -95,6 +99,8 @@ class Manager(Worker):
         rollback: bool = True,
         blacklist: set[int] | None = None,
         seller_pool: list[ConfigSellerPersona] | list[SellerPersona] | None = None,
+        sell_price_jitter_min_percent: float = 5.0,
+        sell_price_jitter_max_percent: float = 10.0,
     ) -> Manager:
         """
         Create manager from database.
@@ -106,7 +112,12 @@ class Manager(Worker):
             rollback: If True, rollback transactions.
             blacklist: Auction House row ids to ignore.
             seller_pool: Optional pool of seller personas for restocking.
+            sell_price_jitter_min_percent: Minimum absolute percent jitter for listing prices.
+            sell_price_jitter_max_percent: Maximum absolute percent jitter for listing prices.
         """
+        if sell_price_jitter_min_percent > sell_price_jitter_max_percent:
+            raise ValueError("sell_price_jitter_min_percent cannot exceed sell_price_jitter_max_percent")
+
         personas = cls._normalize_seller_pool(name=name, seller_pool=seller_pool)
         primary = personas[0]
         return cls(
@@ -117,6 +128,8 @@ class Manager(Worker):
             seller=Seller(db=db, rollback=rollback, fail=fail, seller=primary.seller, seller_name=primary.seller_name),
             buyer=Buyer(db=db, rollback=rollback, fail=fail, buyer_name=name),
             seller_pool=tuple(personas),
+            sell_price_jitter_min_percent=sell_price_jitter_min_percent,
+            sell_price_jitter_max_percent=sell_price_jitter_max_percent,
             rollback=rollback,
             fail=fail,
         )
@@ -327,12 +340,30 @@ class Manager(Worker):
             for _ in range(stock - current_stock):
                 if rate is None or random.random() <= rate:
                     persona = self._choose_seller_persona()
+                    listing_price = self._sample_listing_price(base_price=price, stack=stack)
                     self.seller.sell_item(
                         itemid=itemid,
                         stack=stack,
                         date=self._sell_time,
-                        price=price,
+                        price=listing_price,
                         count=1,
                         seller=persona.seller,
                         seller_name=persona.seller_name,
                     )
+
+    def _sample_listing_price(self, base_price: int, stack: bool) -> int:
+        """
+        Sample a listing price around the configured base value.
+
+        Args:
+            base_price: Baseline listing price from the item config.
+            stack: True when sampling a stack listing price.
+        """
+        del stack  # Reserved for future stack-specific behavior.
+
+        jitter_min = self.sell_price_jitter_min_percent / 100.0
+        jitter_max = self.sell_price_jitter_max_percent / 100.0
+        magnitude = random.uniform(jitter_min, jitter_max)
+        sign = 1 if random.random() < 0.6 else -1
+        sampled_price = int(round(base_price * (1 + (sign * magnitude))))
+        return max(1, sampled_price)
