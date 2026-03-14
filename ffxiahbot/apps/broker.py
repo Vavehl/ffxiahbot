@@ -52,6 +52,7 @@ def main(
             db=Database.sqlite(database=str(use_sqlite_db)),
             name=config.name,
             fail=config.fail,
+            seller_pool=config.seller_pool,
         )
         Base.metadata.create_all(manager.db.engine)
     else:
@@ -63,6 +64,7 @@ def main(
             port=config.port,
             name=config.name,
             fail=config.fail,
+            seller_pool=config.seller_pool,
         )
 
     # test database connection
