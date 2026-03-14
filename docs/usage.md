@@ -41,6 +41,13 @@ tick: 30 # seconds between buying
 restock: 3600 # seconds between selling
 use_buying_rates: false  # Only buy items a fraction of the time?
 use_selling_rates: false  # Only sell items a fraction of the time?
+use_seller_pool_weights: false  # Keep legacy uniform seller picks unless enabled.
+seller_pool: null  # Optional [{id, name, weight}] personas for sell listings.
+sell_price_jitter_min_percent: 0.0  # 0.0 keeps exact CSV sell prices.
+sell_price_jitter_max_percent: 0.0  # Set >0 for realism jitter.
+sell_overstock_attempt_cap: 0  # 0 disables overstock attempts.
+sell_overstock_decay: 0.5  # decay for each extra overstock attempt.
+buy_price_slippage_percent: 0.0  # 0.0 keeps hard buy cap from CSV.
 
 # sql
 hostname: 127.0.0.1 # SQL parameter
@@ -49,6 +56,29 @@ username: root # SQL parameter
 password: root # SQL parameter
 port: 3306 # SQL parameter
 fail: true # fail on SQL database errors?
+```
+
+
+## Realism knobs (safe defaults)
+
+The defaults shown above preserve legacy behavior (no jitter, no slippage, no weighted persona selection, and no overstock attempts).
+
+Example profile with conservative realism enabled:
+
+```yaml
+use_seller_pool_weights: true
+seller_pool:
+  - id: 0
+    name: M.H.M.U.
+    weight: 3.0
+  - id: 999
+    name: AltSeller
+    weight: 1.0
+sell_price_jitter_min_percent: 1.0
+sell_price_jitter_max_percent: 3.0
+sell_overstock_attempt_cap: 1
+sell_overstock_decay: 0.5
+buy_price_slippage_percent: 2.0
 ```
 
 ## Running the CLI

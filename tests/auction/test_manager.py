@@ -553,3 +553,46 @@ def test_sell_item_low_pressure_allows_restock_and_overstock(
         )
         # 2 restock listings + 2 overstock listings
         assert rows.count() == 4
+
+
+def test_manager_defaults_preserve_legacy_realism_behavior(populated_fake_db: Database) -> None:
+    manager = Manager.from_db(populated_fake_db, name="X", rollback=True, fail=True)
+
+    assert manager.sell_price_jitter_min_percent == 0.0
+    assert manager.sell_price_jitter_max_percent == 0.0
+    assert manager.sell_overstock_attempt_cap == 0
+    assert manager.buy_price_slippage_percent == 0.0
+    assert manager.use_seller_pool_weights is False
+
+
+def test_choose_seller_persona_ignores_weights_when_disabled(
+    populated_fake_db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = [
+        SellerPersona(seller=11, seller_name="Alpha", weight=10.0),
+        SellerPersona(seller=22, seller_name="Bravo", weight=1.0),
+    ]
+    manager = Manager.from_db(populated_fake_db, name="X", seller_pool=pool, use_seller_pool_weights=False)
+
+    captured: dict[str, object] = {}
+
+    def fake_choices(_population, weights=None, k=1):
+        captured["weights"] = weights
+        return [pool[0]]
+
+    monkeypatch.setattr("ffxiahbot.auction.manager.random.choices", fake_choices)
+
+    manager._choose_seller_persona()
+    assert captured["weights"] is None
+
+
+def test_buy_row_slippage_zero_preserves_legacy_price_cap(populated_fake_db: Database) -> None:
+    setup_ah_transactions(populated_fake_db, AHR(price=101, seller=1, seller_name="A", itemid=1, stack=0))
+    manager = Manager.from_db(populated_fake_db, name="X", buy_price_slippage_percent=0.0)
+
+    with populated_fake_db.scoped_session() as session:
+        row = session.query(AuctionHouse).filter(AuctionHouse.id == 1).one()
+        assert manager._buy_row(row, max_price=100) is False
+
+    assert 1 in manager.blacklist
