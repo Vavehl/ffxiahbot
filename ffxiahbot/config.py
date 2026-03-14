@@ -39,8 +39,12 @@ class Config(BaseModel):
     use_buying_rates: bool = Field(default=False)  # Only buy items a fraction of the time?
     use_selling_rates: bool = Field(default=False)  # Only sell items a fraction of the time?
     seller_pool: list[SellerPersona] | None = Field(default=None)  # Optional pool of seller identities.
-    sell_price_jitter_min_percent: float = Field(default=5.0, ge=0.0)  # Min listing price jitter percentage.
-    sell_price_jitter_max_percent: float = Field(default=10.0, ge=0.0)  # Max listing price jitter percentage.
+    use_seller_pool_weights: bool = Field(default=False)  # Use seller persona weights when picking listing sellers.
+    sell_price_jitter_min_percent: float = Field(default=0.0, ge=0.0)  # Min listing price jitter percentage.
+    sell_price_jitter_max_percent: float = Field(default=0.0, ge=0.0)  # Max listing price jitter percentage.
+    sell_overstock_attempt_cap: int = Field(default=0, ge=0)  # Extra attempts after target stock is reached.
+    sell_overstock_decay: float = Field(default=0.5, gt=0.0, le=1.0)  # Geometric decay for overstock attempts.
+    buy_price_slippage_percent: float = Field(default=0.0, ge=0.0)  # Allowed buy-price slippage above configured cap.
 
     # Database
     hostname: str = Field(default="127.0.0.1")  # SQL address

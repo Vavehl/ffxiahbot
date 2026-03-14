@@ -55,6 +55,10 @@ def main(
             seller_pool=config.seller_pool,
             sell_price_jitter_min_percent=config.sell_price_jitter_min_percent,
             sell_price_jitter_max_percent=config.sell_price_jitter_max_percent,
+            sell_overstock_attempt_cap=config.sell_overstock_attempt_cap,
+            sell_overstock_decay=config.sell_overstock_decay,
+            buy_price_slippage_percent=config.buy_price_slippage_percent,
+            use_seller_pool_weights=config.use_seller_pool_weights,
         )
         Base.metadata.create_all(manager.db.engine)
     else:
@@ -69,6 +73,10 @@ def main(
             seller_pool=config.seller_pool,
             sell_price_jitter_min_percent=config.sell_price_jitter_min_percent,
             sell_price_jitter_max_percent=config.sell_price_jitter_max_percent,
+            sell_overstock_attempt_cap=config.sell_overstock_attempt_cap,
+            sell_overstock_decay=config.sell_overstock_decay,
+            buy_price_slippage_percent=config.buy_price_slippage_percent,
+            use_seller_pool_weights=config.use_seller_pool_weights,
         )
 
     # test database connection

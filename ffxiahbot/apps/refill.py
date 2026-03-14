@@ -40,8 +40,13 @@ def main(
             db=Database.sqlite(database=str(use_sqlite_db)),
             name=config.name,
             fail=config.fail,
+            seller_pool=config.seller_pool,
             sell_price_jitter_min_percent=config.sell_price_jitter_min_percent,
             sell_price_jitter_max_percent=config.sell_price_jitter_max_percent,
+            sell_overstock_attempt_cap=config.sell_overstock_attempt_cap,
+            sell_overstock_decay=config.sell_overstock_decay,
+            buy_price_slippage_percent=config.buy_price_slippage_percent,
+            use_seller_pool_weights=config.use_seller_pool_weights,
         )
         Base.metadata.create_all(manager.db.engine)
     else:
@@ -53,8 +58,13 @@ def main(
             port=config.port,
             name=config.name,
             fail=config.fail,
+            seller_pool=config.seller_pool,
             sell_price_jitter_min_percent=config.sell_price_jitter_min_percent,
             sell_price_jitter_max_percent=config.sell_price_jitter_max_percent,
+            sell_overstock_attempt_cap=config.sell_overstock_attempt_cap,
+            sell_overstock_decay=config.sell_overstock_decay,
+            buy_price_slippage_percent=config.buy_price_slippage_percent,
+            use_seller_pool_weights=config.use_seller_pool_weights,
         )
 
     # load data

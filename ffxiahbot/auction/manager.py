@@ -60,6 +60,10 @@ class Manager(Worker):
     sell_overstock_attempt_cap: int
     #: Geometric decay factor for each successive overstock attempt.
     sell_overstock_decay: float
+    #: Additional percentage allowed above configured buy caps.
+    buy_price_slippage_percent: float
+    #: If True, use configured seller persona weights when selecting sellers.
+    use_seller_pool_weights: bool
 
     @classmethod
     def create_database_and_manager(
@@ -103,10 +107,12 @@ class Manager(Worker):
         rollback: bool = True,
         blacklist: set[int] | None = None,
         seller_pool: list[ConfigSellerPersona] | list[SellerPersona] | None = None,
-        sell_price_jitter_min_percent: float = 5.0,
-        sell_price_jitter_max_percent: float = 10.0,
+        sell_price_jitter_min_percent: float = 0.0,
+        sell_price_jitter_max_percent: float = 0.0,
         sell_overstock_attempt_cap: int = 0,
         sell_overstock_decay: float = 0.5,
+        buy_price_slippage_percent: float = 0.0,
+        use_seller_pool_weights: bool = False,
     ) -> Manager:
         """
         Create manager from database.
@@ -122,6 +128,8 @@ class Manager(Worker):
             sell_price_jitter_max_percent: Maximum absolute percent jitter for listing prices.
             sell_overstock_attempt_cap: Maximum number of additional listings to attempt once stock is reached.
             sell_overstock_decay: Geometric decay factor for each additional overstock attempt.
+            buy_price_slippage_percent: Allowed percent above configured buy cap before rejecting purchase.
+            use_seller_pool_weights: If True, honor configured seller_pool weights for persona selection.
         """
         if sell_price_jitter_min_percent > sell_price_jitter_max_percent:
             raise ValueError("sell_price_jitter_min_percent cannot exceed sell_price_jitter_max_percent")
@@ -129,6 +137,8 @@ class Manager(Worker):
             raise ValueError("sell_overstock_attempt_cap cannot be negative")
         if not 0 < sell_overstock_decay <= 1:
             raise ValueError("sell_overstock_decay must be within (0, 1]")
+        if buy_price_slippage_percent < 0:
+            raise ValueError("buy_price_slippage_percent cannot be negative")
 
         personas = cls._normalize_seller_pool(name=name, seller_pool=seller_pool)
         primary = personas[0]
@@ -144,6 +154,8 @@ class Manager(Worker):
             sell_price_jitter_max_percent=sell_price_jitter_max_percent,
             sell_overstock_attempt_cap=sell_overstock_attempt_cap,
             sell_overstock_decay=sell_overstock_decay,
+            buy_price_slippage_percent=buy_price_slippage_percent,
+            use_seller_pool_weights=use_seller_pool_weights,
             rollback=rollback,
             fail=fail,
         )
@@ -168,7 +180,8 @@ class Manager(Worker):
         """
         Choose a seller persona for the current listing attempt.
         """
-        return random.choices(self.seller_pool, weights=[p.weight for p in self.seller_pool], k=1)[0]
+        weights = [p.weight for p in self.seller_pool] if self.use_seller_pool_weights else None
+        return random.choices(self.seller_pool, weights=weights, k=1)[0]
 
     def add_to_blacklist(self, rowid: int) -> None:
         """
@@ -214,29 +227,57 @@ class Manager(Worker):
 
                     if row.stack:
                         if not item.buy_stacks:
-                            logger.debug("not allowed to buy item! itemid=%d", row.itemid)
+                            logger.debug("buy skip forbidden stack item: row=%d itemid=%d", row.id, row.itemid)
                             self.add_to_blacklist(row.id)
                             counts["forbidden item"] += 1
                         else:
-                            if not use_buying_rates or random.random() <= item.buy_rate_stacks:
+                            if not use_buying_rates:
+                                gate_roll = None
+                                passed_rate_gate = True
+                            else:
+                                gate_roll = random.random()
+                                passed_rate_gate = gate_roll <= item.buy_rate_stacks
+
+                            if passed_rate_gate:
                                 if self._buy_row(row, item.price_stacks):
                                     counts["stack purchased"] += 1
                                 else:
                                     counts["price too high"] += 1
                             else:
+                                logger.debug(
+                                    "buy skip rate gate failed: row=%d itemid=%d stack=1 roll=%.4f required<=%.4f",
+                                    row.id,
+                                    row.itemid,
+                                    gate_roll,
+                                    item.buy_rate_stacks,
+                                )
                                 counts["buy rate too low"] += 1
                     else:
                         if not item.buy_single:
-                            logger.debug("not allowed to buy item! itemid=%d", row.itemid)
+                            logger.debug("buy skip forbidden single item: row=%d itemid=%d", row.id, row.itemid)
                             self.add_to_blacklist(row.id)
                             counts["forbidden item"] += 1
                         else:
-                            if not use_buying_rates or random.random() <= item.buy_rate_single:
+                            if not use_buying_rates:
+                                gate_roll = None
+                                passed_rate_gate = True
+                            else:
+                                gate_roll = random.random()
+                                passed_rate_gate = gate_roll <= item.buy_rate_single
+
+                            if passed_rate_gate:
                                 if self._buy_row(row, item.price_single):
                                     counts["single purchased"] += 1
                                 else:
                                     counts["price too high"] += 1
                             else:
+                                logger.debug(
+                                    "buy skip rate gate failed: row=%d itemid=%d stack=0 roll=%.4f required<=%.4f",
+                                    row.id,
+                                    row.itemid,
+                                    gate_roll,
+                                    item.buy_rate_single,
+                                )
                                 counts["buy rate too low"] += 1
 
             counts_frame = pd.DataFrame.from_dict(counts, orient="index").rename(columns={0: "count"})
@@ -258,21 +299,35 @@ class Manager(Worker):
             self.add_to_blacklist(row.id)
             return False
 
+        effective_max_price = int(round(max_price * (1 + (self.buy_price_slippage_percent / 100.0))))
+
         # check price
-        if row.price <= max_price:
+        if row.price <= effective_max_price:
             date = timeutils.timestamp(datetime.datetime.now())
             executed_price = AuctionHouse.validate_price(row.price)
-            self.buyer.set_row_buyer_info(row, date, executed_price)
-            return True
-        else:
-            logger.info(
-                "price too high! itemid=%d %d <= %d",
+            logger.debug(
+                "buy execute: row=%d itemid=%d listed_price=%d configured_cap=%d effective_cap=%d slippage_pct=%.2f",
+                row.id,
                 row.itemid,
                 row.price,
                 max_price,
+                effective_max_price,
+                self.buy_price_slippage_percent,
             )
-            self.add_to_blacklist(row.id)
-            return False
+            self.buyer.set_row_buyer_info(row, date, executed_price)
+            return True
+
+        logger.info(
+            "price too high: row=%d itemid=%d listed_price=%d configured_cap=%d effective_cap=%d slippage_pct=%.2f",
+            row.id,
+            row.itemid,
+            row.price,
+            max_price,
+            effective_max_price,
+            self.buy_price_slippage_percent,
+        )
+        self.add_to_blacklist(row.id)
+        return False
 
     def restock_items(self, item_list: ItemList, use_selling_rates: bool = False) -> None:
         """
@@ -351,6 +406,8 @@ class Manager(Worker):
             price: The price to sell the item for.
             stock: The amount of items to stock.
         """
+        counts: Counter[str] = Counter()
+
         # check history
         if not self._pool_has_history(itemid=itemid, stack=stack):
             persona = self._choose_seller_persona()
@@ -363,13 +420,15 @@ class Manager(Worker):
                 seller=persona.seller,
                 seller_name=persona.seller_name,
             )
+            counts["history seeded"] += 1
 
         # restock
         current_stock = self._pool_stock(itemid=itemid, stack=stack)
         if current_stock < stock:
             for _ in range(stock - current_stock):
                 probability = 1.0 if rate is None else self._effective_sell_rate(rate, current_stock, stock)
-                if random.random() <= probability:
+                roll = random.random()
+                if roll <= probability:
                     persona = self._choose_seller_persona()
                     listing_price = self._sample_listing_price(base_price=price, stack=stack)
                     self.seller.sell_item(
@@ -382,15 +441,38 @@ class Manager(Worker):
                         seller_name=persona.seller_name,
                     )
                     current_stock += 1
+                    counts["restock sold"] += 1
+                else:
+                    logger.debug(
+                        "sell skip rate gate failed: itemid=%d stack=%d roll=%.4f required<=%.4f",
+                        itemid,
+                        int(stack),
+                        roll,
+                        probability,
+                    )
+                    counts["restock rate gate failed"] += 1
 
         # optional overstock after target stock is reached
         if rate is None or self.sell_overstock_attempt_cap == 0:
+            if counts:
+                logger.debug("manager._sell_item counts itemid=%d stack=%d: %s", itemid, int(stack), dict(counts))
             return
 
         for attempt in range(self.sell_overstock_attempt_cap):
             effective_rate = self._effective_sell_rate(rate, current_stock, stock)
             probability = effective_rate * (self.sell_overstock_decay**attempt)
-            if random.random() > probability:
+            roll = random.random()
+            if roll > probability:
+                logger.debug(
+                    "sell overstock stop: itemid=%d stack=%d attempt=%d roll=%.4f required<=%.4f decay=%.4f",
+                    itemid,
+                    int(stack),
+                    attempt,
+                    roll,
+                    probability,
+                    self.sell_overstock_decay,
+                )
+                counts["overstock rate gate failed"] += 1
                 break
 
             persona = self._choose_seller_persona()
@@ -405,6 +487,10 @@ class Manager(Worker):
                 seller_name=persona.seller_name,
             )
             current_stock += 1
+            counts["overstock sold"] += 1
+
+        if counts:
+            logger.debug("manager._sell_item counts itemid=%d stack=%d: %s", itemid, int(stack), dict(counts))
 
     def _sample_listing_price(self, base_price: int, stack: bool) -> int:
         """
@@ -420,5 +506,17 @@ class Manager(Worker):
         jitter_max = self.sell_price_jitter_max_percent / 100.0
         magnitude = random.uniform(jitter_min, jitter_max)
         sign = 1 if random.random() < 0.6 else -1
-        sampled_price = int(round(base_price * (1 + (sign * magnitude))))
-        return max(1, sampled_price)
+        jitter_fraction = sign * magnitude
+        sampled_price = int(round(base_price * (1 + jitter_fraction)))
+        final_price = max(1, sampled_price)
+        logger.debug(
+            "sell price jitter sampled: base_price=%d stack=%d jitter_fraction=%.4f min_pct=%.2f max_pct=%.2f sampled_price=%d final_price=%d",
+            base_price,
+            int(stack),
+            jitter_fraction,
+            self.sell_price_jitter_min_percent,
+            self.sell_price_jitter_max_percent,
+            sampled_price,
+            final_price,
+        )
+        return final_price
