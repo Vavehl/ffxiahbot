@@ -500,8 +500,6 @@ class Manager(Worker):
             base_price: Baseline listing price from the item config.
             stack: True when sampling a stack listing price.
         """
-        del stack  # Reserved for future stack-specific behavior.
-
         jitter_min = self.sell_price_jitter_min_percent / 100.0
         jitter_max = self.sell_price_jitter_max_percent / 100.0
         magnitude = random.uniform(jitter_min, jitter_max)
