@@ -310,6 +310,25 @@ def test_sample_listing_price_stays_within_bounds(populated_fake_db: Database, m
     assert all(90 <= price <= 110 for price in prices)
 
 
+def test_sample_listing_price_accepts_stack_flag(populated_fake_db: Database) -> None:
+    manager = Manager.from_db(
+        populated_fake_db,
+        name="X",
+        rollback=True,
+        fail=True,
+        sell_price_jitter_min_percent=0.0,
+        sell_price_jitter_max_percent=0.0,
+    )
+
+    stack_price = manager._sample_listing_price(base_price=100, stack=True)
+    single_price = manager._sample_listing_price(base_price=100, stack=False)
+
+    assert isinstance(stack_price, int)
+    assert isinstance(single_price, int)
+    assert stack_price > 0
+    assert single_price > 0
+
+
 def test_restock_items_uses_jittered_prices_for_active_listings(
     populated_fake_db: Database,
     monkeypatch: pytest.MonkeyPatch,
